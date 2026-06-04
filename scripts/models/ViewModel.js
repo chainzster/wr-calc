@@ -18,6 +18,10 @@ var ViewModel = function (source) {
     // We only need this separate from baseRankings if we want to sort differently.
     this.teams = ko.observableArray();
 
+    this.isClubMode = ko.observable(false);
+    this.seedsRequired = ko.observable(false);
+    this.competitionLabel = ko.observable('');
+
     // The fixtures used to calculate projected rankings.
     this.fixtures = ko.observableArray();
 

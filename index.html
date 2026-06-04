@@ -16,19 +16,40 @@
 <script src="scripts/models/ViewModel.js?v={{site.time|date:'%s'}}" type="text/javascript" ></script>
 <script src="scripts/models/RankingViewModel.js?v={{site.time|date:'%s'}}" type="text/javascript" ></script>
 <script src="scripts/models/FixtureViewModel.js?v={{site.time|date:'%s'}}" type="text/javascript" ></script>
+<script src="scripts/competitions.js?v={{site.time|date:'%s'}}" type="text/javascript" ></script>
 </head>
 <body>
     <div id="union">
-        <a data-bind="css: source == 'mru' ? 'sel' : '', attr: { href: $data.source == 'mru' ? null : '?s=mru' }">
-            MRU
-        </a>
-        <a data-bind="css: source == 'wru' ? 'sel' : '', attr: { href: $data.source == 'wru' ? null : '?s=wru' }">
-            WRU
-        </a>
-        <a data-bind="css: source == '1893' ? 'sel' : '', attr: { href: $data.source == '1893' ? null : '?s=1893' }">
-            RWC2023
-        </a>
+        <span class="nav-group">
+            <a data-bind="css: source == 'mru' ? 'sel' : '', attr: { href: $data.source == 'mru' ? null : '?s=mru' }">MRU</a>
+            <a data-bind="css: source == 'wru' ? 'sel' : '', attr: { href: $data.source == 'wru' ? null : '?s=wru' }">WRU</a>
+            <a data-bind="css: source == '1893' ? 'sel' : '', attr: { href: $data.source == '1893' ? null : '?s=1893' }">RWC2023</a>
+        </span>
+        <span class="nav-group">
+            <a data-bind="css: source == 'sr' ? 'sel' : '', attr: { href: $data.source == 'sr' ? null : '?s=sr' }">SR</a>
+            <a data-bind="css: source == 't14' ? 'sel' : '', attr: { href: $data.source == 't14' ? null : '?s=t14' }">T14</a>
+            <a data-bind="css: source == 'urc' ? 'sel' : '', attr: { href: $data.source == 'urc' ? null : '?s=urc' }">URC</a>
+            <a data-bind="css: source == 'prem' ? 'sel' : '', attr: { href: $data.source == 'prem' ? null : '?s=prem' }">Prem</a>
+        </span>
+        <span class="nav-group">
+            <a data-bind="css: source == 'all' ? 'sel' : '', attr: { href: $data.source == 'all' ? null : '?s=all' }">All</a>
+        </span>
     </div>
+    <!-- ko if: seedsRequired -->
+    <div id="seed-entry">
+        <h4>Set up seed rankings for <span data-bind="text: competitionLabel"></span></h4>
+        <div class="seed-field">
+            <label>Seed date (YYYY-MM-DD):</label>
+            <input id="seed-date" type="text" placeholder="2026-01-05">
+        </div>
+        <div class="seed-field">
+            <label>Teams — one per line: <em>Name, Abbreviation, Points</em></label>
+            <textarea id="seed-csv" rows="20" cols="36" placeholder="Chiefs, CHI, 92.00&#10;Crusaders, CRU, 91.50"></textarea>
+        </div>
+        <button data-bind="click: saveSeedsAndLoad">Save &amp; Load</button>
+    </div>
+    <!-- /ko -->
+    <!-- ko ifnot: seedsRequired -->
     <div id="leftright">
         <div id="left">
             <div class="header">
@@ -45,6 +66,11 @@
                 </label>
             </div>
 
+            <!-- ko if: isClubMode -->
+            <div id="edit-seeds">
+                <a href="#" data-bind="click: clearAndReenterSeeds">Re-enter seeds</a>
+            </div>
+            <!-- /ko -->
             <div id="rankings">
                 <!-- ko ifnot: rankingsChoice -->
                 <h4>
@@ -82,7 +108,7 @@
                             <th colspan="4">Score</th>
                             <th colspan="2">Away team</th>
                             <th title='No Home Advantage'>NHA</th>
-                            <th title='Is Rugby World Cup match'>RWC</th>
+                            <th title='Is Rugby World Cup match' data-bind="visible: !isClubMode()">RWC</th>
                             <th></th>
                     </tr>
                     </thead>
@@ -92,7 +118,7 @@
                         <tr class="details">
                             <td class="details-left" colspan="2" data-bind="text: kickoff" title="Kickoff in your browser time"></td>
                             <td class="details-center" colspan="4" data-bind="text: ($data.eventPhase && $data.liveScoreMode) ? ($data.eventPhase + ' (' + $data.liveScoreMode + ')') : ($data.eventPhase || $data.liveScoreMode)"></td>
-                            <td class="details-right" colspan="5" data-bind="text: venueNameAndCountry, title: venueCity"></td>
+                            <td class="details-right" data-bind="attr: { colspan: $parent.isClubMode() ? 4 : 5 }, text: venueNameAndCountry, title: venueCity"></td>
                         </tr>
                         <!-- /ko -->
                         <tr class="teams">
@@ -104,7 +130,7 @@
                                 <input type="checkbox" data-bind="checked: noHome, disabled: alreadyInRankings" />
                                 <span data-bind="if: switched" title="Home team is nominally Away">*</span>
                             </td>
-                            <td><input type="checkbox" data-bind="checked: isRwc, disabled: alreadyInRankings" /></td>
+                            <td data-bind="visible: !$parent.isClubMode()"><input type="checkbox" data-bind="checked: isRwc, disabled: alreadyInRankings" /></td>
                             <td><button data-bind="click: function () { $parent.fixtures.remove($data); }, disabled: alreadyInRankings">x</button></td>
                         </tr>
                         <!-- ko if: $data.hasValidTeams() && !$data.alreadyInRankings -->
@@ -116,13 +142,13 @@
                             <td class="details-center" data-bind="text: $data.getDisplayChange(3), style: { 'text-decoration': $data.activeChange() == 3 ?  'underline' : 'inherit'}"></td class="details-center">
                             <td class="details-left" data-bind="text: $data.getDisplayChange(4), style: { 'text-decoration': $data.activeChange() == 4 ?  'underline' : 'inherit'}"></td class="details-center">
                             <td class="details-right" data-bind="text: $data.awayRankingBefore() ? $data.awayRankingBefore().toFixed(2) : ''"></td>
-                            <td colspan="3"></td>
+                            <td data-bind="attr: { colspan: $parent.isClubMode() ? 2 : 3 }"></td>
                         </tr>
                         <!-- /ko -->
                         <!-- ko if: alreadyInRankings -->
                         <tr class="possible-changes">
                             <td colspan="8" class="details-center" title="The match is complete and kicked off 90 minutes or more before the latest rankings, so assume it is already included">Already ranked*</td>
-                            <td colspan="3"></td>
+                            <td data-bind="attr: { colspan: $parent.isClubMode() ? 2 : 3 }"></td>
                         </tr>
                         <!-- /ko -->
                     </tbody>
@@ -146,7 +172,7 @@
                             <td></td>
                             <td></td>
                             <td></td>
-                            <td></td>
+                            <td data-bind="visible: !isClubMode()"></td>
                             <td></td>
                         </tr>
                     </tfoot>
@@ -157,9 +183,15 @@
             </div>
         </div>
     </div>
+    <!-- /ko -->
     <div id="footer">
         <span class="secondaryText">
+            <!-- ko ifnot: isClubMode -->
             Rankings and ranking algorithm are the property of <a data-bind="attr: { href: 'https://www.world.rugby/tournaments/rankings/' + $data.rankingsSource() }">World Rugby</a>.
+            <!-- /ko -->
+            <!-- ko if: isClubMode -->
+            Ranking algorithm is the property of <a href="https://www.world.rugby/">World Rugby</a>.
+            <!-- /ko -->
             See <a href="https://github.com/rawling/wr-calc/">GitHub</a> for source, contributors and license.
         </span>
     </div>
