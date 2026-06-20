@@ -14,6 +14,20 @@ if (!sourceString) {
 var viewModel = new ViewModel(sourceString);
 ko.applyBindings(viewModel);
 
+viewModel.saveSeedsAndLoad = function () {
+    saveSeedsFromUI(sourceString);
+};
+
+viewModel.clearAndReenterSeeds = function () {
+    localStorage.removeItem('wr-calc-seeds-' + sourceString);
+    viewModel.teams([]);
+    viewModel.fixtures([]);
+    viewModel.rankingsById(null);
+    viewModel.baseRankings(null);
+    viewModel.rankingsChoice(null);
+    viewModel.seedsRequired(true);
+};
+
 // Load rankings from World Rugby.
 var loadRankings = function (rankingsSource, startDate, fixtures, event) {
     viewModel.rankingsSource(rankingsSource);
@@ -80,21 +94,6 @@ var loadRankings = function (rankingsSource, startDate, fixtures, event) {
         }
     });
 };
-
-if (sourceString == 'mru' || sourceString == 'wru') {
-    loadRankings(sourceString, dateString)
-} else {
-    // load the event!
-    $.get('https://api.wr-rims-prod.pulselive.com/rugby/v3/event/' + sourceString + '/schedule?language=en').done(function (data) {
-
-        loadRankings(
-            data.event.sport,
-            data.event.start.label,// maybe subtract a day so we don't include rankings on that date?
-            data.matches,
-            data.event
-        );
-    });
-}
 
 // Helper to add a fixture to the top/bottom.
 // If we had up/down buttons we could maybe get rid of this.
@@ -341,4 +340,271 @@ ko.bindingHandlers.title = {
             element.removeAttribute('title');
         }
     }
+}
+
+var loadClubCompetition = function (key, dateString) {
+    var comp = CLUB_COMPETITIONS[key];
+    viewModel.isClubMode(true);
+    viewModel.rankingsSource(key);
+
+    var stored = localStorage.getItem('wr-calc-seeds-' + key);
+    var seedData = null;
+    if (stored) {
+        try { seedData = JSON.parse(stored); } catch (e) { seedData = null; }
+    }
+
+    if (!seedData || !seedData.seeds || seedData.seeds.length === 0) {
+        viewModel.competitionLabel(comp.label);
+        viewModel.seedsRequired(true);
+        return;
+    }
+
+    var rankings = {};
+    var sorted = [];
+    var maxLength = 15;
+    $.each(seedData.seeds, function (i, seed) {
+        var team = {
+            id: String(comp.baseId + i),
+            name: seed.name,
+            abbreviation: seed.abbreviation,
+            displayName: seed.name.length > maxLength ? seed.abbreviation : seed.name,
+            displayTitle: seed.name.length > maxLength ? seed.name : null
+        };
+        var entry = { team: team, pts: parseFloat(seed.pts), pos: i + 1 };
+        var rv = new RankingViewModel(entry);
+        viewModel.teams.push(team);
+        rankings[team.id] = rv;
+        sorted.push(rv);
+    });
+
+    viewModel.rankingsById(rankings);
+    viewModel.baseRankings(sorted);
+    viewModel.originalDate(dateString || seedData.seedDate);
+    viewModel.originalMillis = new Date(dateString || seedData.seedDate).getTime();
+    viewModel.rankingsChoice('original');
+
+    if (fixturesString) {
+        viewModel.fixturesString(fixturesString);
+        viewModel.rankingsChoice('calculated');
+        viewModel.queryString.subscribe(function (qs) {
+            history.replaceState(null, '', '?' + qs);
+        });
+    } else if (comp.matchApiBase) {
+        loadClubFixtures(comp, rankings);
+    } else {
+        addFixture();
+        viewModel.queryString.subscribe(function (qs) {
+            history.replaceState(null, '', '?' + qs);
+        });
+    }
+};
+
+var saveSeedsFromUI = function (key) {
+    var seedDate = document.getElementById('seed-date').value.trim();
+    var csv = document.getElementById('seed-csv').value.trim();
+
+    if (!seedDate) { alert('Please enter a seed date.'); return; }
+    if (!csv) { alert('Please enter at least one team.'); return; }
+
+    var seeds = [];
+    var errors = [];
+    $.each(csv.split('\n'), function (i, line) {
+        line = line.trim();
+        if (!line) return;
+        var parts = line.split(',');
+        if (parts.length < 3) { errors.push('Line ' + (i + 1) + ': need Name, Abbreviation, Points'); return; }
+        var name = parts[0].trim();
+        var abbr = parts[1].trim();
+        var pts  = parseFloat(parts[2].trim());
+        if (!name || !abbr || isNaN(pts)) { errors.push('Line ' + (i + 1) + ': invalid data'); return; }
+        seeds.push({ name: name, abbreviation: abbr, pts: pts });
+    });
+
+    if (errors.length > 0) { alert(errors.join('\n')); return; }
+    if (seeds.length === 0) { alert('No valid team data found.'); return; }
+
+    localStorage.setItem('wr-calc-seeds-' + key, JSON.stringify({ seedDate: seedDate, seeds: seeds }));
+
+    viewModel.seedsRequired(false);
+    viewModel.teams([]);
+    viewModel.fixtures([]);
+    loadClubCompetition(key, null);
+};
+
+var loadClubFixtures = function (comp, rankings) {
+    var rankingDate = new Date(viewModel.originalDate());
+    var from = formatDate(rankingDate);
+    var to = formatDate(rankingDate.addDays(14));
+
+    var url = comp.matchApiBase + '/match?startDate=' + from + '&endDate=' + to + '&sort=asc&pageSize=100&page=';
+    if (comp.matchApiParams) {
+        url += '&' + $.param(comp.matchApiParams);
+    }
+
+    var getFixtures = function (fixtures, page, then) {
+        $.get(url + page).done(function (data) {
+            var content = data.content || [];
+            if (content.length === 100) {
+                getFixtures(fixtures.concat(content), page + 1, then);
+            } else {
+                then(fixtures.concat(content));
+            }
+        }).fail(function () {
+            addFixture();
+            viewModel.queryString.subscribe(function (qs) {
+                history.replaceState(null, '', '?' + qs);
+            });
+        });
+    };
+
+    getFixtures([], 0, function (fixtures) {
+        fixturesLoadedClub(fixtures, rankings, comp);
+    });
+};
+
+var fixturesLoadedClub = function (fixtures, rankings, comp) {
+    fixtures.reverse();
+
+    $.each(fixtures, function (i, e) {
+        var raw = (comp.normalizeMatch ? comp.normalizeMatch(e) : e);
+        if (!raw.teams || !raw.teams[0] || !raw.teams[1]) return;
+        if (!rankings[raw.teams[0].id] || !rankings[raw.teams[1].id]) return;
+
+        addFixture(true, function (fixture) {
+            fixture.homeId(raw.teams[0].id);
+            fixture.awayId(raw.teams[1].id);
+            fixture.isRwc(false);
+
+            if (raw.time) {
+                fixture.kickoff = $.formatDateTime('D dd/mm/yy hh:ii', new Date(raw.time.millis));
+            }
+            if (raw.venue) {
+                fixture.venueNameAndCountry = [raw.venue.name, raw.venue.country].join(', ');
+                fixture.venueCity = raw.venue.city;
+            }
+
+            if (comp.homeAdvantageMode === 'none') {
+                fixture.noHome(true);
+                fixture.switched(false);
+            } else {
+                fixture.noHome(false);
+                fixture.switched(false);
+            }
+
+            if (raw.status && raw.status !== 'U' && raw.status !== 'UP' && raw.status !== 'CC') {
+                fixture.homeScore(raw.scores[0]);
+                fixture.awayScore(raw.scores[1]);
+            }
+            switch (raw.status) {
+                case 'U': {
+                    var leeway = 5 * 60 * 1000;
+                    fixture.liveScoreMode = (raw.time.millis + leeway > new Date()) ? 'Upcoming' : 'Unreported';
+                    break;
+                }
+                case 'UP':  fixture.liveScoreMode = 'Postponed'; break;
+                case 'CC':  fixture.liveScoreMode = 'Cancelled'; break;
+                case 'C': {
+                    fixture.liveScoreMode = 'Complete';
+                    if (raw.time.millis + 90 * 60 * 1000 < viewModel.originalMillis) {
+                        fixture.alreadyInRankings = true;
+                    }
+                    break;
+                }
+                case 'L1':  fixture.liveScoreMode = 'First half'; break;
+                case 'L2':  fixture.liveScoreMode = 'Second half'; break;
+                case 'LHT': fixture.liveScoreMode = 'Half time'; break;
+            }
+        });
+    });
+
+    viewModel.queryString.subscribe(function (qs) {
+        history.replaceState(null, '', '?' + qs);
+    });
+};
+
+var loadCombined = function (dateString) {
+    viewModel.isClubMode(true);
+    viewModel.rankingsSource('mru');
+
+    var maxLength = 15;
+    $.get('https://api.wr-rims-prod.pulselive.com/rugby/v3/rankings/mru' + (dateString ? ('?date=' + dateString) : '')).done(function (data) {
+        var rankings = {};
+
+        $.each(data.entries, function (i, e) {
+            e.team.displayName = e.team.name.length > maxLength ? e.team.abbreviation : e.team.name;
+            e.team.displayTitle = e.team.name.length > maxLength ? e.team.name : null;
+            viewModel.teams.push(e.team);
+            rankings[e.team.id] = new RankingViewModel(e);
+        });
+
+        $.each(CLUB_COMPETITIONS, function (key, comp) {
+            var stored = localStorage.getItem('wr-calc-seeds-' + key);
+            if (!stored) return;
+            var seedData;
+            try { seedData = JSON.parse(stored); } catch (e) { return; }
+            if (!seedData || !seedData.seeds) return;
+
+            $.each(seedData.seeds, function (j, seed) {
+                var team = {
+                    id: String(comp.baseId + j),
+                    name: seed.name,
+                    abbreviation: seed.abbreviation,
+                    displayName: seed.name.length > maxLength ? seed.abbreviation : seed.name,
+                    displayTitle: seed.name.length > maxLength ? seed.name : null
+                };
+                var entry = { team: team, pts: parseFloat(seed.pts), pos: 0 };
+                var rv = new RankingViewModel(entry);
+                viewModel.teams.push(team);
+                rankings[team.id] = rv;
+            });
+        });
+
+        viewModel.rankingsById(rankings);
+
+        var sorted = [];
+        $.each(rankings, function (id, rv) { sorted.push(rv); });
+        sorted.sort(function (a, b) { return b.pts() - a.pts(); });
+        $.each(sorted, function (i, r) { r.pos(i + 1); });
+        viewModel.baseRankings(sorted);
+
+        viewModel.originalDate(data.effective.label);
+        viewModel.originalMillis = data.effective.millis;
+        viewModel.rankingsChoice('original');
+
+        if (data.effective.label > dateString) {
+            viewModel.originalDate(dateString);
+            viewModel.originalMillis = new Date(dateString).getTime();
+            viewModel.originalDateIsEstimated(true);
+        }
+
+        if (fixturesString) {
+            viewModel.fixturesString(fixturesString);
+            viewModel.rankingsChoice('calculated');
+            viewModel.queryString.subscribe(function (qs) {
+                history.replaceState(null, '', '?' + qs);
+            });
+        } else {
+            addFixture();
+            loadFixtures(rankings, !!dateString);
+        }
+    });
+};
+
+if (sourceString == 'mru' || sourceString == 'wru') {
+    loadRankings(sourceString, dateString);
+} else if (sourceString == 'all') {
+    loadCombined(dateString);
+} else if (CLUB_COMPETITIONS[sourceString]) {
+    loadClubCompetition(sourceString, dateString);
+} else {
+    // load the event!
+    $.get('https://api.wr-rims-prod.pulselive.com/rugby/v3/event/' + sourceString + '/schedule?language=en').done(function (data) {
+
+        loadRankings(
+            data.event.sport,
+            data.event.start.label,// maybe subtract a day so we don't include rankings on that date?
+            data.matches,
+            data.event
+        );
+    });
 }

@@ -262,12 +262,22 @@ body {
     line-height: 24px;
     width: 100%;
 
+    .nav-group {
+        display: flex;
+        flex-shrink: 0;
+
+        &:not(:first-child) {
+            border-left: 1px solid rgba($black, 0.15);
+        }
+    }
+
     a {
         flex-grow: 1;
         text-align: center;
         border-bottom: 2px solid $white;
         display: block;
         text-decoration: none;
+        padding: 0 6px;
 
         &.sel {
             @extend .primaryText;
@@ -277,6 +287,57 @@ body {
             @extend .secondaryText;
         }
     }
+}
+
+#seed-entry {
+    padding: 16px;
+    max-width: 400px;
+
+    h4 {
+        margin-top: 0;
+    }
+
+    .seed-field {
+        margin-bottom: 12px;
+
+        label {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 12px;
+            @extend .secondaryText;
+        }
+
+        input[type=text] {
+            font-family: 'Roboto', sans-serif;
+            font-size: 13px;
+            padding: 4px;
+            width: 160px;
+        }
+
+        textarea {
+            font-family: monospace;
+            font-size: 12px;
+            padding: 4px;
+            display: block;
+        }
+    }
+
+    button {
+        @extend %accent;
+        border: none;
+        padding: 8px 16px;
+        font-family: 'Roboto', sans-serif;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+    }
+}
+
+#edit-seeds {
+    text-align: right;
+    padding: 2px 8px;
+    font-size: 11px;
+    @extend .secondaryText;
 }
 
 #rankings {
